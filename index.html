@@ -650,15 +650,16 @@ function drawMiniChart(){
   const ty=padT+gH-(goals.protein/maxP)*gH;
   ctx.strokeStyle='#6c63ff55';ctx.lineWidth=1;ctx.setLineDash([4,3]);
   ctx.beginPath();ctx.moveTo(padL,ty);ctx.lineTo(padL+gW,ty);ctx.stroke();ctx.setLineDash([]);
-  const barW=Math.max(4,gW/days.length-3);
+  const cellW=gW/days.length;
+  const barW=Math.max(4,cellW*0.7);
   days.forEach((d,i)=>{
     const p=proteins[i];if(p==null)return;
-    const x=padL+(i/(days.length-1))*gW-barW/2,h=(p/maxP)*gH,y=padT+gH-h;
-    ctx.fillStyle=p<=goals.protein?'#43e97b88':'#ff475788';
+    const x=padL+i*cellW+(cellW-barW)/2,h=(p/maxP)*gH,y=padT+gH-h;
+    ctx.fillStyle=p>=goals.protein?'#43e97b88':'#ff475788';
     ctx.beginPath();ctx.roundRect(x,y,barW,h,2);ctx.fill();
   });
   ctx.fillStyle='#9090b0';ctx.font='10px Segoe UI';ctx.textAlign='center';
-  [0,6,13].forEach(i=>ctx.fillText(days[i].slice(5),padL+(i/(days.length-1))*gW,76));
+  [0,6,13].forEach(i=>ctx.fillText(days[i].slice(5),padL+i*cellW+cellW/2,76));
 }
 
 // ════════════════════════════════════════════════════════
@@ -1191,6 +1192,12 @@ const METRICS=[
 let activeMetric='weight';
 
 function renderCharts(){
+  // Auto-select the first metric that actually has logged data
+  const allEntries=getEntries();
+  if(!allEntries.some(e=>e[activeMetric]!=null)){
+    const firstWithData=METRICS.find(m=>allEntries.some(e=>e[m.key]!=null));
+    if(firstWithData)activeMetric=firstWithData.key;
+  }
   document.getElementById('metric-tabs').innerHTML=METRICS.map(m=>
     `<div class="chart-tab ${m.key===activeMetric?'active':''}" onclick="setMetric('${m.key}')">${m.label}</div>`
   ).join('');
@@ -1202,8 +1209,7 @@ function drawMetricChart(){
   const canvas=document.getElementById('main-chart'),ctx=canvas.getContext('2d');
   const entries=getEntries().filter(e=>e[activeMetric]!=null);
   const goals=getGoals(),m=METRICS.find(x=>x.key===activeMetric);
-  const goalKey={bf:'bf',muscle:'muscle',waist:'waist',weight:'weight'}[activeMetric];
-  const goalVal=goals[goalKey];
+  const goalVal=goals[activeMetric]??0;
   const W=canvas.parentElement.offsetWidth||700;
   canvas.width=W;canvas.height=220;ctx.clearRect(0,0,W,220);
   if(!entries.length){ctx.fillStyle='#9090b0';ctx.font='14px Segoe UI';ctx.textAlign='center';ctx.fillText('No data yet',W/2,110);return}
@@ -1254,15 +1260,16 @@ function drawProteinChart(){
   const ty=padT+(1-(goals.protein/maxP))*gH;
   ctx.strokeStyle='#6c63ff88';ctx.lineWidth=1.5;ctx.setLineDash([4,3]);
   ctx.beginPath();ctx.moveTo(padL,ty);ctx.lineTo(padL+gW,ty);ctx.stroke();ctx.setLineDash([]);
-  const barW=Math.max(4,gW/recent.length-3);
+  const cellW=gW/recent.length;
+  const barW=Math.max(4,cellW*0.7);
   recent.forEach((e,i)=>{
-    const x=padL+(i/(recent.length-1||1))*gW-barW/2,h=(e.protein/maxP)*gH,y=padT+gH-h;
-    ctx.fillStyle=e.protein<=goals.protein?'#43e97b99':'#ff475799';
+    const x=padL+i*cellW+(cellW-barW)/2,h=(e.protein/maxP)*gH,y=padT+gH-h;
+    ctx.fillStyle=e.protein>=goals.protein?'#43e97b99':'#ff475799';
     ctx.beginPath();ctx.roundRect(x,y,barW,h,2);ctx.fill();
   });
   ctx.fillStyle='#9090b0';ctx.font='10px Segoe UI';ctx.textAlign='center';
   const step=Math.max(1,Math.floor(recent.length/6));
-  recent.forEach((e,i)=>{if(i%step===0||i===recent.length-1)ctx.fillText(e.date.slice(5),padL+(i/(recent.length-1||1))*gW,160-padB+14)});
+  recent.forEach((e,i)=>{if(i%step===0||i===recent.length-1)ctx.fillText(e.date.slice(5),padL+i*cellW+cellW/2,160-padB+14)});
 }
 
 function drawWorkoutChart(){
@@ -1727,58 +1734,6 @@ getExercises(); // init default exercises if needed
 })();
 // ─────────────────────────────────────────────────────────────────────────────
 
-// ── Seed default plan (only when plan is missing) ────────────────────────────
-(function seedDefaultPlan(){
-  const SEED_NAME='Projekt Longevity \u2013 6 Wochen';
-  if(getPlans().some(p=>p.name===SEED_NAME))return;
-
-  // Plan data
-  const plan={
-    id:900001,
-    name:SEED_NAME,
-    weeks:6,
-    active:true,
-    days:[
-      {
-        label:'SESSION 1 \u2013 Sonntag',
-        exercises:[
-          {exId:1001,targetSets:1,targetReps:'10 Min',         targetWeight:''},
-          {exId:1002,targetSets:3,targetReps:'10',             targetWeight:''},
-          {exId:1003,targetSets:3,targetReps:'10',             targetWeight:''},
-          {exId:1004,targetSets:3,targetReps:'10',             targetWeight:''},
-          {exId:1005,targetSets:3,targetReps:'10',             targetWeight:''},
-          {exId:1006,targetSets:3,targetReps:'12',             targetWeight:''},
-          {exId:1007,targetSets:3,targetReps:'10',             targetWeight:''},
-          {exId:1008,targetSets:1,targetReps:'20 Min Zone 3',  targetWeight:''},
-        ]
-      },
-      {
-        label:'SESSION 2 \u2013 Dienstag',
-        exercises:[
-          {exId:1009,targetSets:3,targetReps:'10',             targetWeight:''},
-          {exId:1010,targetSets:3,targetReps:'10',             targetWeight:''},
-          {exId:7,   targetSets:3,targetReps:'12',             targetWeight:''},
-          {exId:10,  targetSets:3,targetReps:'15',             targetWeight:''},
-          {exId:1006,targetSets:3,targetReps:'10',             targetWeight:''},
-          {exId:1011,targetSets:3,targetReps:'16',             targetWeight:''},
-        ]
-      },
-      {
-        label:'SESSION 3 \u2013 Do/Fr',
-        exercises:[
-          {exId:1012,targetSets:4,targetReps:'8',              targetWeight:''},
-          {exId:1013,targetSets:3,targetReps:'24',             targetWeight:''},
-          {exId:1007,targetSets:3,targetReps:'12',             targetWeight:''},
-          {exId:10,  targetSets:3,targetReps:'15',             targetWeight:''},
-          {exId:1014,targetSets:4,targetReps:'15',             targetWeight:''},
-          {exId:1008,targetSets:1,targetReps:'10-15 Min Zone 3',targetWeight:''},
-        ]
-      }
-    ]
-  };
-  const plans=getPlans();plans.push(plan);set(PLANS_KEY,plans);
-})();
-// ─────────────────────────────────────────────────────────────────────────────
 
 document.getElementById('log-date').value=today();
 document.getElementById('sess-date').value=today();
