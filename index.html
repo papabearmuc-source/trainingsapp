@@ -1109,13 +1109,15 @@ function deletePlan(id){
     <h2>Delete Plan</h2>
     <p style="color:var(--text2);margin:12px 0 20px">"${escHtml(plan.name)}" will be permanently deleted.</p>
     <div class="modal-footer">
-      <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
-      <button class="btn btn-danger" onclick="confirmDeletePlan(${id})">Delete</button>
+      <button class="btn btn-secondary" id="modal-cancel-btn">Cancel</button>
+      <button class="btn btn-danger" id="modal-confirm-delete-btn">Delete</button>
     </div>`);
-}
-function confirmDeletePlan(id){
-  set(PLANS_KEY,getPlans().filter(p=>p.id!==id));
-  closeModal();toast('Plan deleted','var(--red)');renderPlans();
+  // Use addEventListener — inline onclick in innerHTML is blocked by PWA/CSP
+  document.getElementById('modal-cancel-btn').addEventListener('click',closeModal);
+  document.getElementById('modal-confirm-delete-btn').addEventListener('click',function(){
+    set(PLANS_KEY,getPlans().filter(p=>p.id!==id));
+    closeModal();toast('Plan deleted','var(--red)');renderPlans();
+  });
 }
 
 function addPlanDay(planId){
@@ -1132,10 +1134,22 @@ function addPlanDay(planId){
 }
 
 function removePlanDay(planId,di){
-  if(!confirm('Remove this day?'))return;
   const plans=getPlans();
   const p=plans.find(x=>x.id===planId);if(!p)return;
-  p.days.splice(di,1);set(PLANS_KEY,plans);renderPlans();
+  const dayLabel=p.days[di]?.label||'this day';
+  openModal(`
+    <h2>Remove Day</h2>
+    <p style="color:var(--text2);margin:12px 0 20px">"${escHtml(dayLabel)}" will be removed from the plan.</p>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" id="modal-cancel-btn">Cancel</button>
+      <button class="btn btn-danger" id="modal-confirm-remove-day-btn">Remove</button>
+    </div>`);
+  document.getElementById('modal-cancel-btn').addEventListener('click',closeModal);
+  document.getElementById('modal-confirm-remove-day-btn').addEventListener('click',function(){
+    const latest=getPlans();
+    const lp=latest.find(x=>x.id===planId);if(lp)lp.days.splice(di,1);
+    set(PLANS_KEY,latest);closeModal();renderPlans();
+  });
 }
 
 function renameDayModal(planId,di){
@@ -1274,14 +1288,18 @@ function drawProteinChart(){
 
 function drawWorkoutChart(){
   const canvas=document.getElementById('workout-chart'),ctx=canvas.getContext('2d');
-  const entries=getEntries();
+  const sessions=getSessions();
   const W=canvas.parentElement.offsetWidth||700;
   canvas.width=W;canvas.height=160;ctx.clearRect(0,0,W,160);
   const weeks=Array.from({length:8},(_,wi)=>{
     const mon=new Date();mon.setDate(mon.getDate()-mon.getDay()+1-(7-wi-1)*7);
     const sun=new Date(mon);sun.setDate(sun.getDate()+6);
-    const wE=entries.filter(e=>e.date>=mon.toISOString().slice(0,10)&&e.date<=sun.toISOString().slice(0,10));
-    return{label:mon.toISOString().slice(5,10),gym:wE.filter(e=>e.workouts?.includes('gym')).length,cardio:wE.filter(e=>e.workouts?.includes('cardio')).length,basketball:wE.filter(e=>e.workouts?.includes('basketball')).length};
+    const monStr=mon.toISOString().slice(0,10),sunStr=sun.toISOString().slice(0,10);
+    const wS=sessions.filter(s=>s.date>=monStr&&s.date<=sunStr);
+    return{label:mon.toISOString().slice(5,10),
+      gym:wS.filter(s=>s.type==='gym'||!s.type).length,
+      cardio:wS.filter(s=>s.type==='cardio').length,
+      basketball:wS.filter(s=>s.type==='basketball').length};
   });
   const[padL,padR,padT,padB]=[30,8,10,26];
   const gW=W-padL-padR,gH=160-padT-padB,maxVal=5;
