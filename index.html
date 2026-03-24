@@ -174,6 +174,7 @@
       <div class="field"><label>Body Fat (%)</label><input type="number" id="log-bf" step="0.1" placeholder="20.6"></div>
       <div class="field"><label>Muscle (%)</label><input type="number" id="log-muscle" step="0.1" placeholder="39.1"></div>
       <div class="field"><label>Waist (cm)</label><input type="number" id="log-waist" step="0.5" placeholder="94"></div>
+      <div class="field"><label>VO2Max (ml/kg/min)</label><input type="number" id="log-vo2max" step="0.1" placeholder="42.5"></div>
     </div>
     <div class="section-title">Nutrition</div>
     <div class="form-grid">
@@ -361,6 +362,7 @@
       <div class="field"><label>Muscle goal (%)</label><input type="number" id="goal-muscle" step="0.1"></div>
       <div class="field"><label>Waist goal (cm)</label><input type="number" id="goal-waist" step="0.5"></div>
       <div class="field"><label>Daily protein target (g)</label><input type="number" id="goal-protein" step="1"></div>
+      <div class="field"><label>VO2Max goal (ml/kg/min)</label><input type="number" id="goal-vo2max" step="0.1"></div>
     </div>
     <div class="btn-row"><button class="btn" onclick="saveGoals()">Save Goals</button></div>
   </div>
@@ -371,6 +373,7 @@
       <div class="field"><label>Start body fat (%)</label><input type="number" id="start-bf" step="0.1"></div>
       <div class="field"><label>Start muscle (%)</label><input type="number" id="start-muscle" step="0.1"></div>
       <div class="field"><label>Start waist (cm)</label><input type="number" id="start-waist" step="0.5"></div>
+      <div class="field"><label>Start VO2Max</label><input type="number" id="start-vo2max" step="0.1"></div>
     </div>
     <div class="btn-row"><button class="btn" onclick="saveStarting()">Save Starting Values</button></div>
   </div>
@@ -440,8 +443,8 @@ const EX_KEY     = 'trackfit_exercises';
 const PLANS_KEY  = 'trackfit_plans';
 const SESS_KEY   = 'trackfit_sessions';
 
-const defaultGoals = {weight:90,bf:17,muscle:38,waist:90,protein:150};
-const defaultStart = {weight:88.7,bf:20.6,muscle:39.1,waist:94};
+const defaultGoals = {weight:90,bf:17,muscle:38,waist:90,protein:150,vo2max:48};
+const defaultStart = {weight:88.7,bf:20.6,muscle:39.1,waist:94,vo2max:40};
 
 function get(key,def=[]){try{return JSON.parse(localStorage.getItem(key))??def}catch{return def}}
 function set(key,val){localStorage.setItem(key,JSON.stringify(val))}
@@ -518,7 +521,7 @@ function parseOptFloat(id){const v=parseFloat(document.getElementById(id).value)
 
 function clearForm(){
   document.getElementById('log-date').value=today();
-  ['log-weight','log-bf','log-muscle','log-waist','log-protein','log-carbs','log-calories','log-steps','log-stepcals','log-notes']
+  ['log-weight','log-bf','log-muscle','log-waist','log-vo2max','log-protein','log-carbs','log-calories','log-steps','log-stepcals','log-notes']
     .forEach(id=>{const el=document.getElementById(id);if(el)el.value=''});
 }
 
@@ -528,6 +531,7 @@ function saveEntry(){
   const entry={id:Date.now(),date,
     weight:parseOptFloat('log-weight'),bf:parseOptFloat('log-bf'),
     muscle:parseOptFloat('log-muscle'),waist:parseOptFloat('log-waist'),
+    vo2max:parseOptFloat('log-vo2max'),
     protein:parseOptFloat('log-protein'),carbs:parseOptFloat('log-carbs'),
     calories:parseOptFloat('log-calories'),
     steps:parseOptFloat('log-steps'),stepsCals:parseOptFloat('log-stepcals'),
@@ -549,12 +553,14 @@ function renderDashboard(){
   for(const e of entries){
     if(e.weight!=null)latest.weight=e.weight;if(e.bf!=null)latest.bf=e.bf;
     if(e.muscle!=null)latest.muscle=e.muscle;if(e.waist!=null)latest.waist=e.waist;
+    if(e.vo2max!=null)latest.vo2max=e.vo2max;
   }
   const metrics=[
     {key:'weight',label:'Weight',unit:'kg',goal:goals.weight,start:start.weight,lower:true,color:'#6c63ff'},
     {key:'bf',label:'Body Fat',unit:'%',goal:goals.bf,start:start.bf,lower:true,color:'#ff6584'},
     {key:'muscle',label:'Muscle',unit:'%',goal:goals.muscle,start:start.muscle,lower:false,color:'#43e97b'},
     {key:'waist',label:'Waist',unit:'cm',goal:goals.waist,start:start.waist,lower:true,color:'#f9ca24'},
+    {key:'vo2max',label:'VO2Max',unit:'',goal:goals.vo2max,start:start.vo2max,lower:false,color:'#00c9ff'},
   ];
   document.getElementById('goals-grid').innerHTML=metrics.map(m=>{
     const cur=latest[m.key]??m.start,s=m.start,g=m.goal;
@@ -1335,6 +1341,7 @@ function renderHistory(){
     if(e.bf)badges.push(`<span class="badge">🔵 ${e.bf}% fat</span>`);
     if(e.muscle)badges.push(`<span class="badge">💪 ${e.muscle}% muscle</span>`);
     if(e.waist)badges.push(`<span class="badge">📏 ${e.waist}cm</span>`);
+    if(e.vo2max)badges.push(`<span class="badge">🫁 ${e.vo2max} VO2Max</span>`);
     if(e.protein)badges.push(`<span class="badge">🥩 ${e.protein}g protein</span>`);
     if(e.carbs)badges.push(`<span class="badge">🍞 ${e.carbs}g carbs</span>`);
     if(e.calories)badges.push(`<span class="badge">🔥 ${e.calories}kcal food</span>`);
@@ -1558,6 +1565,8 @@ function loadSettings(){
   document.getElementById('start-bf').value=start.bf;
   document.getElementById('start-muscle').value=start.muscle;
   document.getElementById('start-waist').value=start.waist;
+  document.getElementById('start-vo2max').value=start.vo2max;
+  document.getElementById('goal-vo2max').value=goals.vo2max;
   // AI provider selector — restore saved choice, then update key placeholder + model label
   const savedProvider = localStorage.getItem(AI_PROVIDER_STORE) || 'gemini';
   const provSel = document.getElementById('ai-provider-select');
@@ -1575,6 +1584,7 @@ function saveGoals(){
     muscle:parseFloat(document.getElementById('goal-muscle').value)||defaultGoals.muscle,
     waist:parseFloat(document.getElementById('goal-waist').value)||defaultGoals.waist,
     protein:parseFloat(document.getElementById('goal-protein').value)||defaultGoals.protein,
+    vo2max:parseFloat(document.getElementById('goal-vo2max').value)||defaultGoals.vo2max,
   });
   toast('Goals saved!');
 }
@@ -1585,6 +1595,7 @@ function saveStarting(){
     bf:parseFloat(document.getElementById('start-bf').value)||defaultStart.bf,
     muscle:parseFloat(document.getElementById('start-muscle').value)||defaultStart.muscle,
     waist:parseFloat(document.getElementById('start-waist').value)||defaultStart.waist,
+    vo2max:parseFloat(document.getElementById('start-vo2max').value)||defaultStart.vo2max,
   });
   toast('Starting values saved!');
 }

@@ -1,4 +1,4 @@
-const CACHE = 'trackfit-v8';
+const CACHE = 'trackfit-v9';
 
 const ASSETS = [
   './',
