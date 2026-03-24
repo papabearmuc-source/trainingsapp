@@ -257,6 +257,7 @@
 
     <!-- CARDIO / BASKETBALL section -->
     <div id="sess-cardio-section" style="display:none">
+      <div id="sess-last-cardio-ref" style="margin-bottom:12px"></div>
       <div class="form-grid">
         <div class="field"><label>Duration (min)</label><input type="number" id="sess-duration" min="1" max="600" step="1" placeholder="45"></div>
         <div class="field"><label>Avg Heart Rate (bpm)</label><input type="number" id="sess-avghr" min="40" max="220" step="1" placeholder="145"></div>
@@ -685,12 +686,69 @@ function drawMiniChart(){
 let currentSession={date:today(),type:'gym',comment:'',exercises:[],duration:null,avgHR:null,calories:null,intensity:''};
 // exercise entry: {exId, name, group, comment, sets:[{reps,weight,comment}]}
 
+// ── Last-session reference helpers ──────────────────────────────────────────
+function getLastExerciseData(exName){
+  const sessions=getSessions();
+  for(let i=sessions.length-1;i>=0;i--){
+    const s=sessions[i];
+    if(s.type&&s.type!=='gym')continue;
+    if(!s.exercises)continue;
+    const ex=s.exercises.find(e=>e.name===exName);
+    if(!ex||!ex.sets||!ex.sets.length)continue;
+    const valid=ex.sets.filter(st=>st.reps!==''||st.weight!=='');
+    if(!valid.length)continue;
+    const weights=[...new Set(valid.map(st=>st.weight).filter(w=>w!==''))];
+    const repsArr=[...new Set(valid.map(st=>st.reps).filter(r=>r!==''))];
+    let summary;
+    if(weights.length===1&&repsArr.length===1){
+      summary=`${valid.length}×${repsArr[0]} @ ${weights[0]} kg`;
+    } else if(valid.length<=4){
+      summary=valid.map(st=>`${st.reps||'?'}×${st.weight||'?'} kg`).join(', ');
+    } else {
+      const nums=weights.map(Number).filter(n=>!isNaN(n));
+      const mn=Math.min(...nums),mx=Math.max(...nums);
+      summary=`${valid.length} sets @ ${mn}–${mx} kg`;
+    }
+    const date=s.date?s.date.slice(5):'';
+    return`${summary} (${date})`;
+  }
+  return null;
+}
+
+function getLastCardioData(type){
+  const sessions=getSessions();
+  for(let i=sessions.length-1;i>=0;i--){
+    const s=sessions[i];
+    if(s.type!==type)continue;
+    const parts=[];
+    if(s.duration)parts.push(`${s.duration} min`);
+    if(s.avgHR)   parts.push(`${s.avgHR} bpm`);
+    if(s.calories)parts.push(`${s.calories} kcal`);
+    if(!parts.length)continue;
+    const label=type==='cardio'?'Ergometer':'Basketball';
+    const date=s.date?s.date.slice(5):'';
+    return`Last ${label}: ${parts.join(' | ')} (${date})`;
+  }
+  return null;
+}
+// ────────────────────────────────────────────────────────────────────────────
+
 function setSessionType(type){
   currentSession.type=type;
   document.querySelectorAll('.sess-type-chip').forEach(c=>c.classList.toggle('selected',c.dataset.type===type));
   document.getElementById('sess-gym-section').style.display    =(type==='gym')                             ?'block':'none';
   document.getElementById('sess-cardio-section').style.display =(type==='cardio'||type==='basketball')     ?'block':'none';
   document.getElementById('sess-rest-section').style.display   =(type==='rest')                            ?'block':'none';
+  // Inject last-session reference for cardio/basketball
+  if(type==='cardio'||type==='basketball'){
+    const ref=document.getElementById('sess-last-cardio-ref');
+    if(ref){
+      const data=getLastCardioData(type);
+      ref.innerHTML=data
+        ?`<div style="color:var(--text2);font-size:12px;padding:8px 12px;background:var(--surface2);border-radius:6px;border:1px solid var(--border)">↩ ${data}</div>`
+        :'';
+    }
+  }
 }
 
 function renderWorkoutPage(){
@@ -791,12 +849,16 @@ function renderSessionExercises(){
   syncSessionFromDOM();
   const container=document.getElementById('session-exercises');
   if(!currentSession.exercises.length){container.innerHTML='<div class="empty-state" style="padding:20px">No exercises added yet.</div>';return}
-  container.innerHTML=currentSession.exercises.map((ex,ei)=>`
+  container.innerHTML=currentSession.exercises.map((ex,ei)=>{
+    const lastEx=getLastExerciseData(ex.name);
+    const lastHint=lastEx?`<div style="color:var(--text2);font-size:11px;margin-top:3px;letter-spacing:.1px">↩ Last: ${lastEx}</div>`:'';
+    return`
     <div class="session-exercise" id="sex-${ei}">
       <div class="session-ex-header">
         <div>
           <span class="session-ex-name">${ex.name}</span>
           <span class="session-ex-group">${ex.group}</span>
+          ${lastHint}
         </div>
         <div style="display:flex;gap:6px">
           <button class="btn btn-secondary btn-sm" onclick="moveEx(${ei},-1)" title="Move up">↑</button>
@@ -822,7 +884,8 @@ function renderSessionExercises(){
         </table>
         <button class="btn btn-secondary btn-sm" style="margin-top:8px" onclick="addSet(${ei})">+ Set</button>
       </div>
-    </div>`).join('');
+    </div>`;
+  }).join('');
 }
 
 function setRowHTML(ei,si,s){
