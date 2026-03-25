@@ -170,10 +170,10 @@
     </div>
     <div class="section-title">Body Metrics <span style="color:var(--text2);font-size:11px">(leave blank if not measured)</span></div>
     <div class="form-grid">
-      <div class="field"><label>Weight (kg)</label><input type="number" id="log-weight" step="0.1" placeholder="88.7"></div>
-      <div class="field"><label>Body Fat (%)</label><input type="number" id="log-bf" step="0.1" placeholder="20.6"></div>
-      <div class="field"><label>Muscle (%)</label><input type="number" id="log-muscle" step="0.1" placeholder="39.1"></div>
-      <div class="field"><label>Waist (cm)</label><input type="number" id="log-waist" step="0.5" placeholder="94"></div>
+      <div class="field"><label>Weight (kg)</label><input type="number" id="log-weight" step="0.1" placeholder="e.g. 75"></div>
+      <div class="field"><label>Body Fat (%)</label><input type="number" id="log-bf" step="0.1" placeholder="e.g. 15"></div>
+      <div class="field"><label>Muscle (%)</label><input type="number" id="log-muscle" step="0.1" placeholder="e.g. 40"></div>
+      <div class="field"><label>Waist (cm)</label><input type="number" id="log-waist" step="0.5" placeholder="e.g. 85"></div>
       <div class="field"><label>VO2Max (ml/kg/min)</label><input type="number" id="log-vo2max" step="0.1" placeholder="42.5"></div>
     </div>
     <div class="section-title">Nutrition</div>
@@ -461,15 +461,15 @@ const ACTIVE_SESS_KEY = 'trackfit_active_session';
 
 let sessionActive = false;
 
-const defaultGoals = {weight:90,bf:17,muscle:38,waist:90,protein:150,vo2max:48};
-const defaultStart = {weight:88.7,bf:20.6,muscle:39.1,waist:94,vo2max:40};
+const defaultGoals = {};
+const defaultStart = {};
 
 function get(key,def=[]){try{return JSON.parse(localStorage.getItem(key))??def}catch{return def}}
 function set(key,val){localStorage.setItem(key,JSON.stringify(val))}
 const getEntries  = ()=>get(STORE,[]);
 const saveEntries = v=>set(STORE,v);
-const getGoals    = ()=>({...defaultGoals,...get(GOALS_KEY,{})});
-const getStart    = ()=>({...defaultStart,...get(START_KEY,{})});
+const getGoals    = ()=>get(GOALS_KEY,{});
+const getStart    = ()=>get(START_KEY,{});
 const getExercises= ()=>get(EX_KEY,null)??initExercises();
 const getPlans    = ()=>get(PLANS_KEY,[]);
 const getSessions = ()=>get(SESS_KEY,[]);
@@ -546,17 +546,27 @@ function clearForm(){
 function saveEntry(){
   const date=document.getElementById('log-date').value;
   if(!date){toast('Pick a date','var(--red)');return}
-  const entry={id:Date.now(),date,
-    weight:parseOptFloat('log-weight'),bf:parseOptFloat('log-bf'),
-    muscle:parseOptFloat('log-muscle'),waist:parseOptFloat('log-waist'),
-    vo2max:parseOptFloat('log-vo2max'),
-    protein:parseOptFloat('log-protein'),carbs:parseOptFloat('log-carbs'),
-    calories:parseOptFloat('log-calories'),
-    steps:parseOptFloat('log-steps'),stepsCals:parseOptFloat('log-stepcals'),
-    notes:document.getElementById('log-notes').value.trim()};
   const entries=getEntries();
   const idx=entries.findIndex(e=>e.date===date);
-  if(idx>=0)entries[idx]=entry;else entries.push(entry);
+  if(idx>=0){
+    // Merge: only overwrite fields that are explicitly filled; leave blank fields unchanged
+    const e=entries[idx];
+    const fieldMap={weight:'log-weight',bf:'log-bf',muscle:'log-muscle',waist:'log-waist',
+      vo2max:'log-vo2max',protein:'log-protein',carbs:'log-carbs',calories:'log-calories',
+      steps:'log-steps',stepsCals:'log-stepcals'};
+    Object.entries(fieldMap).forEach(([field,id])=>{const v=parseOptFloat(id);if(v!=null)e[field]=v;});
+    const notes=document.getElementById('log-notes').value.trim();
+    if(notes)e.notes=notes;
+    entries[idx]=e;
+  }else{
+    entries.push({id:Date.now(),date,
+      weight:parseOptFloat('log-weight'),bf:parseOptFloat('log-bf'),
+      muscle:parseOptFloat('log-muscle'),waist:parseOptFloat('log-waist'),
+      vo2max:parseOptFloat('log-vo2max'),protein:parseOptFloat('log-protein'),
+      carbs:parseOptFloat('log-carbs'),calories:parseOptFloat('log-calories'),
+      steps:parseOptFloat('log-steps'),stepsCals:parseOptFloat('log-stepcals'),
+      notes:document.getElementById('log-notes').value.trim()});
+  }
   entries.sort((a,b)=>a.date.localeCompare(b.date));
   saveEntries(entries);
   toast('Entry saved!');clearForm();
@@ -583,20 +593,24 @@ function renderDashboard(){
   document.getElementById('goals-grid').innerHTML=metrics.map(m=>{
     const cur=latest[m.key]??m.start,s=m.start,g=m.goal;
     let pct,deltaLabel,barColor;
-    if(m.lower){
+    if(cur==null||s==null||g==null){
+      pct=0;barColor='var(--border)';
+      deltaLabel='<span style="color:var(--text2)">Set goal &amp; start in Settings</span>';
+    }else if(m.lower){
       pct=s===g?100:Math.max(0,Math.min(100,((s-cur)/(s-g))*100));
       const diff=+(cur-g).toFixed(1);
       deltaLabel=diff<=0?`<span style="color:var(--green)">✓ Goal reached!</span>`:`<span style="color:var(--text2)">${diff>0?'+':''}${diff}${m.unit} to go</span>`;
+      barColor=pct>=100?'var(--green)':pct>50?m.color:'var(--orange)';
     }else{
       pct=s===g?100:Math.max(0,Math.min(100,((cur-s)/(g-s))*100));
       const diff=+(g-cur).toFixed(1);
       deltaLabel=diff<=0?`<span style="color:var(--green)">✓ Goal reached!</span>`:`<span style="color:var(--text2)">${diff}${m.unit} to go</span>`;
+      barColor=pct>=100?'var(--green)':pct>50?m.color:'var(--orange)';
     }
-    barColor=pct>=100?'var(--green)':pct>50?m.color:'var(--orange)';
     return `<div class="goal-card">
       <div class="label">${m.label}</div>
-      <div class="value" style="color:${m.color}">${cur}${m.unit}</div>
-      <div class="target">Goal: ${m.lower?'≤':'≥'} ${g}${m.unit} · Start: ${s}${m.unit}</div>
+      <div class="value" style="color:${m.color}">${cur!=null?cur+m.unit:'—'}</div>
+      <div class="target">Goal: ${g!=null?(m.lower?'≤':'≥')+' '+g+m.unit:'—'} · Start: ${s!=null?s+m.unit:'—'}</div>
       <div class="progress-bar"><div class="progress-fill" style="width:${pct}%;background:${barColor}"></div></div>
       <div class="delta">${deltaLabel}</div>
     </div>`;
@@ -631,18 +645,18 @@ function renderDashboard(){
     const daySessions=sessions.filter(s=>s.date===d);
     const icons=daySessions.map(s=>typeIcon[s.type||'gym']||'🏋️').join('');
     const dayDur=daySessions.reduce((sum,s)=>sum+((s.type==='gym'?s.gymDuration:s.duration)||0),0);
-    const dayCals=daySessions.reduce((sum,s)=>sum+((s.type==='gym'?s.gymCals:s.calories)||0),0);
+    const workoutCals=daySessions.reduce((sum,s)=>sum+((s.type==='gym'?s.gymCals:s.calories)||0),0);
     const entry=entries.find(x=>x.date===d);
+    const totalDayCals=workoutCals+(entry?.stepsCals||0);
     const isT=d===today();
     return `<div style="background:${isT?'var(--surface2)':'var(--surface)'};border:1px solid ${isT?'var(--accent)':'var(--border)'};border-radius:8px;padding:8px 10px;min-width:70px;text-align:center">
       <div style="font-size:11px;color:var(--text2)">${days[i]}</div>
       <div style="font-size:11px;color:var(--text2)">${d.slice(5)}</div>
       <div style="font-size:18px;min-height:22px">${icons||''}</div>
       ${dayDur?`<div style="font-size:11px;color:var(--text2)">${dayDur}min</div>`:''}
-      ${dayCals?`<div style="font-size:11px;color:var(--orange)">🔥${dayCals}</div>`:''}
-      ${entry?.protein?`<div style="font-size:11px;color:${entry.protein>=getGoals().protein?'var(--green)':'var(--text2)'}">${entry.protein}g</div>`:''}
+      ${totalDayCals?`<div style="font-size:11px;color:var(--orange)">🔥${totalDayCals}</div>`:''}
+      ${entry?.protein?`<div style="font-size:11px;color:${entry.protein>=(getGoals().protein||Infinity)?'var(--green)':'var(--text2)'}">${entry.protein}g</div>`:''}
       ${entry?.steps?`<div style="font-size:11px;color:var(--text2)">👣${entry.steps.toLocaleString()}</div>`:''}
-      ${entry?.stepsCals?`<div style="font-size:11px;color:var(--orange)">🔥${entry.stepsCals}</div>`:''}
     </div>`;
   }).join('')+`</div>`;
   drawMiniChart();
@@ -660,7 +674,7 @@ function drawMiniChart(){
   const W=canvas.parentElement.offsetWidth||600;
   canvas.width=W;canvas.height=80;ctx.clearRect(0,0,W,80);
   const entries=getEntries(),goals=getGoals();
-  const days=Array.from({length:14},(_,i)=>{const d=new Date();d.setDate(d.getDate()-13+i);return d.toISOString().slice(0,10)});
+  const days=Array.from({length:14},(_,i)=>{const d=new Date();d.setDate(d.getDate()-13+i);return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;});
   const proteins=days.map(d=>entries.find(x=>x.date===d)?.protein??null);
   const maxP=Math.max(goals.protein*1.3,...proteins.filter(Boolean));
   const [padL,padR,padT,padB]=[8,8,8,20];
@@ -1500,6 +1514,7 @@ function switchHistTab(el){
 function renderHistory(){
   if(histTab==='sessions'){renderSessionHistory();return}
   const entries=getEntries().slice().reverse();
+  const sessions=getSessions();
   const wF=document.getElementById('filter-workout').value;
   const frF=document.getElementById('filter-from').value;
   const toF=document.getElementById('filter-to').value;
@@ -1530,11 +1545,25 @@ function renderHistory(){
     if(e.vo2max)badges.push(`<span class="badge">🫁 ${e.vo2max} VO2Max</span>`);
     if(e.protein)badges.push(`<span class="badge">🥩 ${e.protein}g protein</span>`);
     if(e.carbs)badges.push(`<span class="badge">🍞 ${e.carbs}g carbs</span>`);
-    if(e.calories)badges.push(`<span class="badge">🔥 ${e.calories}kcal food</span>`);
     if(e.steps)badges.push(`<span class="badge">👣 ${e.steps.toLocaleString()} steps</span>`);
-    if(e.stepsCals)badges.push(`<span class="badge">🔥 ${e.stepsCals}kcal steps</span>`);
     if(e.notes)badges.push(`<span class="badge">📝 ${e.notes}</span>`);
-    return `<div class="history-item"><span class="date">${e.date}</span><div class="details">${badges.join('')}</div><button class="delete-btn" onclick="deleteEntry(${e.id})">✕</button></div>`;
+    // Calorie balance section
+    const daySessions=sessions.filter(s=>s.date===e.date);
+    const workoutCals=daySessions.reduce((sum,s)=>sum+((s.type==='gym'?s.gymCals:s.calories)||0),0);
+    const totalOut=workoutCals+(e.stepsCals||0);
+    const calsIn=e.calories||0;
+    const showBalance=calsIn||totalOut;
+    const balanceHTML=showBalance?`<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px;padding-top:6px;border-top:1px solid var(--border);align-items:center">
+      <span style="color:var(--text2);font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.6px">Calories:</span>
+      ${calsIn?`<span class="badge" style="background:#1a2e1a;color:#43e97b">🍽️ IN: ${calsIn} kcal</span>`:''}
+      ${totalOut?`<span class="badge" style="background:#2e1a1a;color:#f0932b">🔥 OUT: ${totalOut} kcal${workoutCals&&e.stepsCals?` (${workoutCals} workout + ${e.stepsCals} steps)`:''}</span>`:''}
+      ${(calsIn&&totalOut)?`<span class="badge" style="background:${calsIn-totalOut>=0?'#1a1a2e':'#2e1a1a'};color:${calsIn-totalOut>=0?'#6c63ff':'#ff4757'}">⚖️ Net: ${calsIn-totalOut>0?'+':''}${calsIn-totalOut} kcal</span>`:''}
+    </div>`:'';
+    return `<div class="history-item" style="${showBalance?'flex-direction:column;align-items:stretch':''}">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
+        <span class="date">${e.date}</span><div class="details">${badges.join('')}</div>
+        <button class="delete-btn" onclick="deleteEntry(${e.id})">✕</button>
+      </div>${balanceHTML}</div>`;
   }).join(''):`<div class="empty-state">No entries found.</div>`;
 }
 
@@ -1742,17 +1771,17 @@ async function askAICoach(){
 // ════════════════════════════════════════════════════════
 function loadSettings(){
   const goals=getGoals(),start=getStart();
-  document.getElementById('goal-weight').value=goals.weight;
-  document.getElementById('goal-bf').value=goals.bf;
-  document.getElementById('goal-muscle').value=goals.muscle;
-  document.getElementById('goal-waist').value=goals.waist;
-  document.getElementById('goal-protein').value=goals.protein;
-  document.getElementById('start-weight').value=start.weight;
-  document.getElementById('start-bf').value=start.bf;
-  document.getElementById('start-muscle').value=start.muscle;
-  document.getElementById('start-waist').value=start.waist;
-  document.getElementById('start-vo2max').value=start.vo2max;
-  document.getElementById('goal-vo2max').value=goals.vo2max;
+  document.getElementById('goal-weight').value=goals.weight??'';
+  document.getElementById('goal-bf').value=goals.bf??'';
+  document.getElementById('goal-muscle').value=goals.muscle??'';
+  document.getElementById('goal-waist').value=goals.waist??'';
+  document.getElementById('goal-protein').value=goals.protein??'';
+  document.getElementById('start-weight').value=start.weight??'';
+  document.getElementById('start-bf').value=start.bf??'';
+  document.getElementById('start-muscle').value=start.muscle??'';
+  document.getElementById('start-waist').value=start.waist??'';
+  document.getElementById('start-vo2max').value=start.vo2max??'';
+  document.getElementById('goal-vo2max').value=goals.vo2max??'';
   // AI provider selector — restore saved choice, then update key placeholder + model label
   const savedProvider = localStorage.getItem(AI_PROVIDER_STORE) || 'gemini';
   const provSel = document.getElementById('ai-provider-select');
@@ -1764,24 +1793,19 @@ function loadSettings(){
 }
 
 function saveGoals(){
+  const pf=id=>{const v=parseFloat(document.getElementById(id).value);return isNaN(v)?null:v};
   set(GOALS_KEY,{
-    weight:parseFloat(document.getElementById('goal-weight').value)||defaultGoals.weight,
-    bf:parseFloat(document.getElementById('goal-bf').value)||defaultGoals.bf,
-    muscle:parseFloat(document.getElementById('goal-muscle').value)||defaultGoals.muscle,
-    waist:parseFloat(document.getElementById('goal-waist').value)||defaultGoals.waist,
-    protein:parseFloat(document.getElementById('goal-protein').value)||defaultGoals.protein,
-    vo2max:parseFloat(document.getElementById('goal-vo2max').value)||defaultGoals.vo2max,
+    weight:pf('goal-weight'),bf:pf('goal-bf'),muscle:pf('goal-muscle'),
+    waist:pf('goal-waist'),protein:pf('goal-protein'),vo2max:pf('goal-vo2max'),
   });
   toast('Goals saved!');
 }
 
 function saveStarting(){
+  const pf=id=>{const v=parseFloat(document.getElementById(id).value);return isNaN(v)?null:v};
   set(START_KEY,{
-    weight:parseFloat(document.getElementById('start-weight').value)||defaultStart.weight,
-    bf:parseFloat(document.getElementById('start-bf').value)||defaultStart.bf,
-    muscle:parseFloat(document.getElementById('start-muscle').value)||defaultStart.muscle,
-    waist:parseFloat(document.getElementById('start-waist').value)||defaultStart.waist,
-    vo2max:parseFloat(document.getElementById('start-vo2max').value)||defaultStart.vo2max,
+    weight:pf('start-weight'),bf:pf('start-bf'),muscle:pf('start-muscle'),
+    waist:pf('start-waist'),vo2max:pf('start-vo2max'),
   });
   toast('Starting values saved!');
 }
@@ -1878,8 +1902,6 @@ function escHtml(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt
 // ════════════════════════════════════════════════════════
 // Init
 // ════════════════════════════════════════════════════════
-if(!localStorage.getItem(GOALS_KEY))set(GOALS_KEY,defaultGoals);
-if(!localStorage.getItem(START_KEY))set(START_KEY,defaultStart);
 getExercises(); // init default exercises if needed
 
 // ── Seed extra exercises (always runs, checks by name) ───────────────────────
