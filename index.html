@@ -386,6 +386,7 @@
       <div class="field"><label>Start muscle (%)</label><input type="number" id="start-muscle" step="0.1"></div>
       <div class="field"><label>Start waist (cm)</label><input type="number" id="start-waist" step="0.5"></div>
       <div class="field"><label>Start VO2Max</label><input type="number" id="start-vo2max" step="0.1"></div>
+      <div class="field"><label>Geburtsjahr</label><input type="number" id="start-birthyear" placeholder="z.B. 1985" min="1920" max="2010"></div>
     </div>
     <div class="btn-row"><button class="btn" onclick="saveStarting()">Save Starting Values</button></div>
     <div class="section-title" style="margin-top:18px">Grundumsatz / BMR <span style="font-weight:400;text-transform:none;font-size:11px">(Katch-McArdle, automatisch)</span></div>
@@ -470,6 +471,7 @@ const ACTIVE_SESS_KEY = 'trackfit_active_session';
 const BMR_KEY             = 'trackfit_bmr';
 const PR_KEY              = 'trackfit_prs';
 const BEST_STREAK_KEY     = 'trackfit_best_streak';
+const BIRTH_YEAR_KEY      = 'trackfit_birth_year';
 const WORKOUT_TYPES_KEY   = 'trackfit_workout_types';
 const BUILTIN_TYPES       = ['gym','rest'];
 const DEFAULT_WORKOUT_TYPES = [
@@ -1981,20 +1983,113 @@ function calcLongevityScore(){
     calcKPIScore(latest.vo2max,goals.vo2max,start.vo2max,false),
   ];
   const bodyScore=Math.round(kpis.reduce((s,v)=>s+v,0)/kpis.length);
+  // Consistency: rolling 4-week average
   const now=new Date();
-  const weekStart=new Date(now);weekStart.setDate(now.getDate()-now.getDay()+1);
-  const weekStr=weekStart.toISOString().slice(0,10);
-  const wS=sessions.filter(s=>s.date>=weekStr);
-  const gymN=wS.filter(s=>!s.type||s.type==='gym').length;
-  const cardioN=wS.filter(s=>s.type==='cardio').length;
-  const bbN=wS.filter(s=>s.type==='basketball').length;
-  const consistencyScore=Math.round((Math.min(gymN,3)/3+Math.min(cardioN,2)/2+Math.min(bbN,1)/1)/3*100);
+  const mondayOff=(now.getDay()+6)%7;
+  const weeklyRatios=[];
+  for(let w=0;w<4;w++){
+    const ws=new Date(now);ws.setDate(now.getDate()-mondayOff-w*7);
+    const we=new Date(ws);we.setDate(ws.getDate()+6);
+    const wsStr=ws.toISOString().slice(0,10),weStr=we.toISOString().slice(0,10);
+    const wS=sessions.filter(s=>s.date>=wsStr&&s.date<=weStr);
+    const done=wS.filter(s=>!s.type||s.type==='gym').length
+              +wS.filter(s=>s.type==='cardio').length
+              +wS.filter(s=>s.type==='basketball').length;
+    weeklyRatios.push(Math.min(1,done/6));
+  }
+  const consistencyScore=Math.round(weeklyRatios.reduce((s,v)=>s+v,0)/4*100);
+  // Nutrition: last 28 days
   const proteinGoal=goals.protein||150;
-  const last7=Array.from({length:7},(_,i)=>{const d=new Date();d.setDate(d.getDate()-i);return d.toISOString().slice(0,10)});
-  const proteinDays=last7.filter(d=>{const e=entries.find(x=>x.date===d);return(e?.protein||0)>=proteinGoal}).length;
-  const nutritionScore=Math.round(proteinDays/7*100);
+  const last28=Array.from({length:28},(_,i)=>{const d=new Date();d.setDate(d.getDate()-i);return d.toISOString().slice(0,10)});
+  const proteinDays=last28.filter(d=>{const e=entries.find(x=>x.date===d);return(e?.protein||0)>=proteinGoal}).length;
+  const nutritionScore=Math.round(proteinDays/28*100);
   const total=Math.round(bodyScore*0.4+consistencyScore*0.3+nutritionScore*0.3);
   return{total,body:bodyScore,consistency:consistencyScore,nutrition:nutritionScore};
+}
+
+function calcBioAge(){
+  const entries=getEntries(),sessions=getSessions();
+  const byVal=parseInt(localStorage.getItem(BIRTH_YEAR_KEY));
+  const chronoAge=byVal&&byVal>1920?new Date().getFullYear()-byVal:40;
+  const latest={};
+  for(const e of entries){
+    if(e.bf!=null)latest.bf=e.bf;if(e.muscle!=null)latest.muscle=e.muscle;
+    if(e.vo2max!=null)latest.vo2max=e.vo2max;
+  }
+  // Average training HR from last 28 days
+  const cutoff=new Date();cutoff.setDate(cutoff.getDate()-28);
+  const cutStr=cutoff.toISOString().slice(0,10);
+  const hrs=sessions.filter(s=>s.date>=cutStr).map(s=>s.gymAvgHR||s.avgHR).filter(Boolean);
+  const avgHR=hrs.length?Math.round(hrs.reduce((s,v)=>s+v,0)/hrs.length):null;
+  // Consistency last 4 weeks (reuse same logic)
+  const now=new Date();
+  const mondayOff=(now.getDay()+6)%7;
+  let totalDone=0;
+  for(let w=0;w<4;w++){
+    const ws=new Date(now);ws.setDate(now.getDate()-mondayOff-w*7);
+    const we=new Date(ws);we.setDate(ws.getDate()+6);
+    const wsStr=ws.toISOString().slice(0,10),weStr=we.toISOString().slice(0,10);
+    const wS=sessions.filter(s=>s.date>=wsStr&&s.date<=weStr);
+    totalDone+=wS.filter(s=>!s.type||s.type==='gym').length
+              +wS.filter(s=>s.type==='cardio').length
+              +wS.filter(s=>s.type==='basketball').length;
+  }
+  const consistencyPct=Math.min(100,Math.round(totalDone/24*100));
+  // Components: [name, weight, value, avg_ref, excellent_ref, lower_is_better, unit]
+  const defs=[
+    ['VO2Max',       0.30,latest.vo2max,  40,  50, false,'ml/kg/min'],
+    ['Körperfett',   0.20,latest.bf,      22,14.5, true, '%'],
+    ['Trainings-HR', 0.20,avgHR,          72,  52, true, 'bpm'],
+    ['Muskelmasse',  0.15,latest.muscle,  35,  40, false,'%'],
+    ['Konsistenz',   0.15,consistencyPct, 50, 100, false,'%'],
+  ];
+  const components=[];
+  for(const[name,weight,val,avg,exc,lower,unit] of defs){
+    if(val==null)continue;
+    const norm=lower?(avg-val)/(avg-exc):(val-avg)/(exc-avg);
+    components.push({name,weight,norm:Math.max(-2,Math.min(2,norm)),value:val,unit});
+  }
+  if(components.length<2)return null;
+  const totalW=components.reduce((s,c)=>s+c.weight,0);
+  const adjustment=components.reduce((s,c)=>s+c.norm*(c.weight/totalW)*10,0);
+  const bioAge=Math.round(chronoAge-adjustment);
+  return{bioAge,chronoAge,adjustment:Math.round(adjustment*10)/10,components};
+}
+
+function addDays(str,n){const d=new Date(str);d.setDate(d.getDate()+n);return d.toISOString().slice(0,10)}
+
+function calcWeekScore(wsStr){
+  const weStr=addDays(wsStr,6);
+  const sessions=getSessions(),entries=getEntries(),goals=getGoals();
+  const wS=sessions.filter(s=>s.date>=wsStr&&s.date<=weStr);
+  const gymN=Math.min(wS.filter(s=>!s.type||s.type==='gym').length,3);
+  const cardioN=Math.min(wS.filter(s=>s.type==='cardio').length,2);
+  const bbN=Math.min(wS.filter(s=>s.type==='basketball').length,1);
+  const pG=goals.protein||150;
+  const wE=entries.filter(e=>e.date>=wsStr&&e.date<=weStr);
+  const protDays=Math.min(wE.filter(e=>(e.protein||0)>=pG).length,7);
+  const stepDays=Math.min(wE.filter(e=>(e.steps||0)>=8000).length,7);
+  return Math.round(gymN/3*25+cardioN/2*20+bbN*15+protDays/7*25+stepDays/7*15);
+}
+
+function calcWeeklyComparison(){
+  const now=new Date();
+  const mondayOff=(now.getDay()+6)%7;
+  const weeks=[];
+  for(let i=0;i<8;i++){
+    const ws=new Date(now);ws.setDate(now.getDate()-mondayOff-i*7);
+    weeks.push(ws.toISOString().slice(0,10));
+  }
+  const scores=weeks.map(w=>calcWeekScore(w));
+  const cur=scores[0],last=scores[1];
+  const past7=scores.slice(1);
+  const personalBest=Math.max(...past7,1);
+  const avg4=Math.round(scores.slice(1,5).reduce((s,v)=>s+v,0)/4);
+  let trend='→';
+  if(cur>last+5)trend='↑';
+  else if(cur<last-5)trend='↓';
+  const trendColor=trend==='↑'?'#43e97b':trend==='↓'?'#ff4757':'#f9ca24';
+  return{cur,last,personalBest,avg4,trend,trendColor,scores:scores.slice(0,8),weeks};
 }
 
 function renderLongevityScore(){
@@ -2004,6 +2099,35 @@ function renderLongevityScore(){
   const circ=+(2*Math.PI*r).toFixed(1);
   const offset=+(circ*(1-total/100)).toFixed(1);
   const col=total>=80?'#43e97b':total>=60?'#f9ca24':'#ff4757';
+  // Bio Age section
+  const ba=calcBioAge();
+  const baHTML=ba?`
+    <div style="border-top:1px solid var(--border);margin-top:18px;padding-top:16px">
+      <div style="font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--text2);margin-bottom:12px">Biologisches Alter</div>
+      <div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap">
+        <div style="text-align:center;min-width:90px">
+          <div style="font-size:44px;font-weight:700;line-height:1;color:${ba.bioAge<ba.chronoAge?'#43e97b':'#ff4757'}">${ba.bioAge}</div>
+          <div style="font-size:12px;color:var(--text2);margin-top:4px">Chronologisch: ${ba.chronoAge}</div>
+          <div style="font-size:12px;font-weight:600;color:${ba.bioAge<ba.chronoAge?'#43e97b':'#ff4757'};margin-top:3px">${ba.bioAge<ba.chronoAge?'↓ '+( ba.chronoAge-ba.bioAge)+' J. jünger':ba.bioAge>ba.chronoAge?'↑ '+(ba.bioAge-ba.chronoAge)+' J. älter':'= Deckungsgleich'}</div>
+        </div>
+        <div style="flex:1;min-width:180px;display:flex;flex-direction:column;gap:7px">
+          ${ba.components.map(c=>{
+            const pct=Math.max(0,Math.min(100,Math.round((c.norm+2)/4*100)));
+            const bCol=c.norm>=0?'#43e97b':'#ff4757';
+            return`<div>
+              <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text2);margin-bottom:2px">
+                <span>${c.name}</span><span>${c.value}${c.unit}</span>
+              </div>
+              <div style="height:5px;background:var(--surface2);border-radius:3px;position:relative;overflow:hidden">
+                <div style="position:absolute;left:50%;top:0;width:1px;height:100%;background:var(--border);z-index:1"></div>
+                <div style="height:100%;width:${pct}%;background:${bCol};border-radius:3px"></div>
+              </div>
+            </div>`;
+          }).join('')}
+          <div style="font-size:10px;color:var(--text2);margin-top:2px">◀ älter &nbsp;|&nbsp; Ø Referenz &nbsp;|&nbsp; jünger ▶</div>
+        </div>
+      </div>
+    </div>`:'<div style="border-top:1px solid var(--border);margin-top:18px;padding-top:12px;font-size:12px;color:var(--text2)">Biologisches Alter: Bitte VO2Max, Körperfett &amp; Muskel im Body Log erfassen</div>';
   card.innerHTML=`
     <h3>Projekt Longevity Score</h3>
     <div style="display:flex;align-items:center;gap:24px;flex-wrap:wrap">
@@ -2016,10 +2140,10 @@ function renderLongevityScore(){
         <text x="${cx}" y="${cy+20}" text-anchor="middle" font-size="13" fill="#9090b0" font-family="inherit">/ 100</text>
       </svg>
       <div style="flex:1;min-width:160px;display:flex;flex-direction:column;gap:14px">
-        ${[['Body KPIs',body,'#6c63ff'],['Consistency',consistency,'#43e97b'],['Nutrition',nutrition,'#f9ca24']].map(([lb,sc,c])=>`
+        ${[['Body KPIs (4 Wk.)',body,'#6c63ff'],['Consistency (4 Wk.)',consistency,'#43e97b'],['Nutrition (28 Tage)',nutrition,'#f9ca24']].map(([lb,sc,c])=>`
           <div>
             <div style="display:flex;justify-content:space-between;margin-bottom:4px">
-              <span style="font-size:13px;color:var(--text2)">${lb}</span>
+              <span style="font-size:12px;color:var(--text2)">${lb}</span>
               <span style="font-size:13px;font-weight:600;color:${c}">${sc}</span>
             </div>
             <div style="height:6px;background:var(--surface2);border-radius:3px;overflow:hidden">
@@ -2027,7 +2151,8 @@ function renderLongevityScore(){
             </div>
           </div>`).join('')}
       </div>
-    </div>`;
+    </div>
+    ${baHTML}`;
 }
 
 function isActiveDay(date,entries,sessions){
@@ -2076,48 +2201,33 @@ function renderStreakCard(){
     </div>`;
 }
 
-function calcWeeklyScore(){
-  const now=new Date();
-  const weekStart=new Date(now);weekStart.setDate(now.getDate()-now.getDay()+1);
-  const weekStr=weekStart.toISOString().slice(0,10);
-  const sessions=getSessions(),entries=getEntries(),goals=getGoals();
-  const wS=sessions.filter(s=>s.date>=weekStr);
-  const gymN=Math.min(wS.filter(s=>!s.type||s.type==='gym').length,3);
-  const cardioN=Math.min(wS.filter(s=>s.type==='cardio').length,2);
-  const bbN=Math.min(wS.filter(s=>s.type==='basketball').length,1);
-  const weekDates=Array.from({length:7},(_,i)=>{const d=new Date(weekStart);d.setDate(d.getDate()+i);return d.toISOString().slice(0,10)});
-  const pG=goals.protein||150;
-  const proteinDays=Math.min(weekDates.filter(d=>{const e=entries.find(x=>x.date===d);return(e?.protein||0)>=pG}).length,7);
-  const stepDays=Math.min(weekDates.filter(d=>{const e=entries.find(x=>x.date===d);return(e?.steps||0)>=8000}).length,7);
-  const gymPts=Math.round(gymN/3*25),cardioPts=Math.round(cardioN/2*20),bbPts=Math.round(bbN/1*15);
-  const proteinPts=Math.round(proteinDays/7*25),stepsPts=Math.round(stepDays/7*15);
-  const total=gymPts+cardioPts+bbPts+proteinPts+stepsPts;
-  return{total,gymPts,cardioPts,bbPts,proteinPts,stepsPts,gymN,cardioN,bbN,proteinDays,stepDays};
-}
-
 function renderWeeklyScore(){
   const card=document.getElementById('weekly-score-card');if(!card)return;
-  const s=calcWeeklyScore();
-  const col=s.total>=80?'#43e97b':s.total>=60?'#f9ca24':'#ff4757';
+  const{cur,last,personalBest,avg4,trend,trendColor,scores,weeks}=calcWeeklyComparison();
+  const pctOfBest=personalBest>0?Math.round(cur/personalBest*100):100;
+  const vsAvg=cur-avg4;
+  const barCol=pctOfBest>=80?'#43e97b':pctOfBest>=50?'#f9ca24':'#ff4757';
+  // Sparkline last 8 weeks (oldest left, current right)
+  const sparkMax=Math.max(...scores,1);
+  const sparkBars=['▁','▂','▃','▄','▅','▆','▇','█'];
+  const spark=[...scores].reverse().map(s=>{
+    const idx=Math.round((s/sparkMax)*7);
+    return`<span style="color:${s===cur?barCol:'var(--text2)'}">${sparkBars[idx]||'▁'}</span>`;
+  }).join('');
   card.innerHTML=`
-    <h3>Diese Woche</h3>
+    <h3>Woche im Vergleich</h3>
     <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:10px">
-      <span style="font-size:44px;font-weight:700;color:${col};line-height:1">${s.total}</span>
-      <span style="color:var(--text2);font-size:13px">/ 100 Pkt.</span>
+      <span style="font-size:44px;font-weight:700;color:${barCol};line-height:1">${cur}</span>
+      <span style="font-size:20px;color:${trendColor};font-weight:700">${trend}</span>
+      <span style="color:var(--text2);font-size:12px">${vsAvg>=0?'+':''}${vsAvg} vs. Ø</span>
     </div>
-    <div style="height:7px;background:var(--surface2);border-radius:4px;overflow:hidden;margin-bottom:12px">
-      <div style="height:100%;width:${s.total}%;background:${col};border-radius:4px"></div>
+    <div style="font-size:11px;color:var(--text2);margin-bottom:5px">${pctOfBest}% des persönlichen Bests (${personalBest} Pkt.)</div>
+    <div style="height:7px;background:var(--surface2);border-radius:4px;overflow:hidden;margin-bottom:12px;position:relative">
+      <div style="height:100%;width:${pctOfBest}%;background:${barCol};border-radius:4px"></div>
+      ${avg4>0?`<div style="position:absolute;left:${Math.round(avg4/personalBest*100)}%;top:-2px;width:2px;height:11px;background:var(--text2);border-radius:1px" title="4-Wochen-Schnitt"></div>`:''}
     </div>
-    <div style="display:flex;flex-direction:column;gap:5px;font-size:12px">
-      ${[['🏋️ Gym',s.gymPts,25,s.gymN+'/3'],['🚴 Cardio',s.cardioPts,20,s.cardioN+'/2'],
-         ['🏀 Basketball',s.bbPts,15,s.bbN+'/1'],['🥩 Protein',s.proteinPts,25,s.proteinDays+'/7 Tage'],
-         ['👣 Steps ≥8k',s.stepsPts,15,s.stepDays+'/7 Tage']]
-        .map(([lb,pts,max,detail])=>`<div style="display:flex;gap:8px">
-          <span style="width:100px;color:var(--text2)">${lb}</span>
-          <span style="width:50px;color:${pts>=max?'var(--green)':'var(--text)'};font-weight:${pts>=max?700:400}">${pts}/${max}pt</span>
-          <span style="color:var(--text2)">${detail}</span>
-        </div>`).join('')}
-    </div>`;
+    <div style="font-size:12px;color:var(--text2);margin-bottom:8px">4-Wochen-Schnitt: <strong style="color:var(--text)">${avg4}</strong> &nbsp;·&nbsp; Letzte Woche: <strong style="color:var(--text)">${last}</strong></div>
+    <div style="font-size:18px;letter-spacing:2px;margin-top:4px">${spark}</div>`;
 }
 
 function getPRs(){return get(PR_KEY,{});}
@@ -2229,6 +2339,7 @@ function loadSettings(){
   document.getElementById('start-waist').value=start.waist??'';
   document.getElementById('start-vo2max').value=start.vo2max??'';
   document.getElementById('goal-vo2max').value=goals.vo2max??'';
+  document.getElementById('start-birthyear').value=localStorage.getItem(BIRTH_YEAR_KEY)??'';
   renderBMRDisplay();
   renderWorkoutTypesSettings();
   // AI provider selector — restore saved choice, then update key placeholder + model label
@@ -2256,6 +2367,9 @@ function saveStarting(){
     weight:pf('start-weight'),bf:pf('start-bf'),muscle:pf('start-muscle'),
     waist:pf('start-waist'),vo2max:pf('start-vo2max'),
   });
+  const byVal=parseInt(document.getElementById('start-birthyear').value);
+  if(!isNaN(byVal)&&byVal>1920&&byVal<2010)localStorage.setItem(BIRTH_YEAR_KEY,String(byVal));
+  else localStorage.removeItem(BIRTH_YEAR_KEY);
   toast('Starting values saved!');
   renderBMRDisplay();
 }
