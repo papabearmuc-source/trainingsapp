@@ -711,10 +711,10 @@ function renderDashboard(){
   for(const e of entries){
     if(e.weight!=null)latest.weight=e.weight;
     const kfaVal=e.kfa??e.bf; if(kfaVal!=null)latest.kfa=kfaVal;
-    if(e.lbm!=null)latest.lbm=e.lbm;
     if(e.waist!=null)latest.waist=e.waist;
     if(e.vo2max!=null)latest.vo2max=e.vo2max;
   }
+  latest.lbm=getLatestLBM(); // 3-entry rolling average
   const prevLBM=getPrevLBM();
   const metrics=[
     {key:'weight',label:'Gewicht',unit:'kg',goal:goals.weight,start:start.weight,lower:true,color:'#6c63ff'},
@@ -1595,28 +1595,47 @@ function drawLBMChart(){
   canvas.width=W;canvas.height=200;ctx.clearRect(0,0,W,200);
   if(!entries.length){ctx.fillStyle='#9090b0';ctx.font='14px Segoe UI';ctx.textAlign='center';ctx.fillText('Noch keine LBM-Daten',W/2,100);return}
   const vals=entries.map(e=>e.lbm);
-  const minV=Math.min(...vals)*0.98,maxV=Math.max(...vals)*1.02;
+  // 3-entry rolling average for each point
+  const smooth=vals.map((_,i)=>{
+    const w=vals.slice(Math.max(0,i-2),i+1);
+    return Math.round(w.reduce((s,v)=>s+v,0)/w.length*10)/10;
+  });
+  const allVals=[...vals,...smooth];
+  const minV=Math.min(...allVals)*0.98,maxV=Math.max(...allVals)*1.02;
   const[padL,padR,padT,padB]=[44,16,14,30];
   const gW=W-padL-padR,gH=200-padT-padB;
   const toX=i=>padL+(i/(entries.length-1||1))*gW;
   const toY=v=>padT+(1-(v-minV)/(maxV-minV))*gH;
+  // Grid
   ctx.strokeStyle='#2e2e45';ctx.lineWidth=1;
   for(let i=0;i<=4;i++){
     const y=padT+(i/4)*gH;ctx.beginPath();ctx.moveTo(padL,y);ctx.lineTo(padL+gW,y);ctx.stroke();
     ctx.fillStyle='#9090b0';ctx.font='10px Segoe UI';ctx.textAlign='right';
     ctx.fillText((maxV-i/4*(maxV-minV)).toFixed(1),padL-4,y+3);
   }
+  // Gradient fill under smooth line
   const grad=ctx.createLinearGradient(0,padT,0,padT+gH);
-  grad.addColorStop(0,'#43e97b33');grad.addColorStop(1,'#43e97b05');
+  grad.addColorStop(0,'#43e97b22');grad.addColorStop(1,'#43e97b05');
   ctx.beginPath();ctx.moveTo(toX(0),padT+gH);
-  entries.forEach((_,i)=>ctx.lineTo(toX(i),toY(vals[i])));
+  smooth.forEach((_,i)=>ctx.lineTo(toX(i),toY(smooth[i])));
   ctx.lineTo(toX(entries.length-1),padT+gH);ctx.closePath();ctx.fillStyle=grad;ctx.fill();
+  // Raw measurement dots (grey, small)
+  vals.forEach((_,i)=>{ctx.beginPath();ctx.arc(toX(i),toY(vals[i]),2.5,0,Math.PI*2);ctx.fillStyle='#9090b055';ctx.fill()});
+  // Smoothed trendline (green, main)
   ctx.strokeStyle='#43e97b';ctx.lineWidth=2.5;ctx.lineJoin='round';
-  ctx.beginPath();entries.forEach((_,i)=>i===0?ctx.moveTo(toX(i),toY(vals[i])):ctx.lineTo(toX(i),toY(vals[i])));ctx.stroke();
-  entries.forEach((_,i)=>{ctx.beginPath();ctx.arc(toX(i),toY(vals[i]),3.5,0,Math.PI*2);ctx.fillStyle='#43e97b';ctx.fill()});
+  ctx.beginPath();smooth.forEach((_,i)=>i===0?ctx.moveTo(toX(i),toY(smooth[i])):ctx.lineTo(toX(i),toY(smooth[i])));ctx.stroke();
+  // Dots on smooth line
+  smooth.forEach((_,i)=>{ctx.beginPath();ctx.arc(toX(i),toY(smooth[i]),3.5,0,Math.PI*2);ctx.fillStyle='#43e97b';ctx.fill()});
+  // X labels
   ctx.fillStyle='#9090b0';ctx.font='10px Segoe UI';ctx.textAlign='center';
   const step=Math.max(1,Math.floor(entries.length/8));
   entries.forEach((e,i)=>{if(i%step===0||i===entries.length-1)ctx.fillText(e.date.slice(5),toX(i),200-padB+14)});
+  // Legend
+  ctx.font='10px Segoe UI';ctx.textAlign='left';
+  ctx.fillStyle='#9090b055';ctx.beginPath();ctx.arc(padL+5,padT+gH+22,3,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle='#9090b0';ctx.fillText('Messwert',padL+12,padT+gH+26);
+  ctx.fillStyle='#43e97b';ctx.beginPath();ctx.arc(padL+85,padT+gH+22,3.5,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle='#9090b0';ctx.fillText('Ø 3 Einträge',padL+92,padT+gH+26);
 }
 function setMetric(k){activeMetric=k;renderCharts()}
 
