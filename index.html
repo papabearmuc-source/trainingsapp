@@ -2552,18 +2552,22 @@ function renderPRHistory(){
 function calcBMR(){
   const entries=getEntries();
   const height=getHeight();
-  for(let i=entries.length-1;i>=0;i--){
+  // Collect last 3 entries that have both weight and KFA
+  const usable=[];
+  for(let i=entries.length-1;i>=0&&usable.length<3;i--){
     const e=entries[i];
     let kfa=e.kfa;
     if(kfa==null&&e.waist&&e.neck)kfa=calcNavyKFA(e.waist,e.neck,height);
     if(kfa==null)kfa=e.bf;
     if(e.weight!=null&&kfa!=null){
       const lbm=e.lbm??Math.round(e.weight*(1-kfa/100)*10)/10;
-      const bmr=Math.round(370+21.6*lbm);
-      return{bmr,lbm,weight:e.weight,kfa,date:e.date,method:e.kfa!=null?'Navy':e.bf!=null?'Omron':'Navy (live)'};
+      usable.push({lbm,weight:e.weight,kfa,date:e.date,method:e.kfa!=null?'Navy':e.bf!=null?'Omron':'Navy (live)'});
     }
   }
-  return null;
+  if(!usable.length)return null;
+  const avgLBM=Math.round(usable.reduce((s,x)=>s+x.lbm,0)/usable.length*10)/10;
+  const bmr=Math.round(370+21.6*avgLBM);
+  return{bmr,lbm:avgLBM,entries:usable,n:usable.length};
 }
 
 function renderBMRDisplay(){
@@ -2574,14 +2578,19 @@ function renderBMRDisplay(){
     el.innerHTML='<span style="color:var(--text2);font-size:13px">— Bitte Gewicht und Körperfett im Body Log erfassen</span>';
     return;
   }
+  const rowsHTML=d.entries.map(x=>
+    `<div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text2);padding:2px 0">
+      <span>${x.date}</span>
+      <span>${x.weight}kg · KFA ${x.kfa?.toFixed(1)}% (${x.method}) · LBM <strong style="color:var(--text)">${x.lbm}kg</strong></span>
+    </div>`
+  ).join('');
   el.innerHTML=`
     <div style="font-size:24px;font-weight:700;color:var(--accent);margin-bottom:6px">${d.bmr} kcal/Tag</div>
-    <div style="color:var(--text2);font-size:12px;line-height:1.7">
-      KFA (${d.method}) = ${d.kfa?.toFixed(1)}%<br>
-      LBM = ${d.weight} kg × (1 − ${d.kfa?.toFixed(1)}%) = <strong style="color:var(--text)">${d.lbm} kg</strong><br>
-      BMR = 370 + 21,6 × ${d.lbm} = <strong style="color:var(--text)">${d.bmr} kcal</strong><br>
-      <span style="font-size:11px;color:var(--text2)">Basierend auf Eintrag vom ${d.date}</span>
-    </div>`;
+    <div style="color:var(--text2);font-size:12px;line-height:1.7;margin-bottom:8px">
+      Ø LBM (letzte ${d.n} Einträge) = <strong style="color:var(--text)">${d.lbm} kg</strong><br>
+      BMR = 370 + 21,6 × ${d.lbm} = <strong style="color:var(--text)">${d.bmr} kcal</strong>
+    </div>
+    <div style="border-top:1px solid var(--border);padding-top:8px">${rowsHTML}</div>`;
 }
 
 function getLatestWeight(){
