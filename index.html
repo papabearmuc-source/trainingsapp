@@ -164,7 +164,7 @@
   <div class="goals-grid" id="goals-grid"></div>
   <div id="longevity-score-card" class="card"></div>
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
-    <div id="streak-card" class="card" style="margin-bottom:0"></div>
+    <div id="aktivitaet-card" class="card" style="margin-bottom:0"></div>
     <div id="weekly-score-card" class="card" style="margin-bottom:0"></div>
   </div>
   <div class="summary-row" id="summary-row"></div>
@@ -807,7 +807,7 @@ function renderDashboard(){
     </div>`;
   }).join('')+`</div>`;
   renderLongevityScore();
-  renderStreakCard();
+  renderAktivitaetCard();
   renderWeeklyScore();
   drawMiniChart();
   // AI Coach button
@@ -2456,44 +2456,57 @@ function isActiveDay(date,entries,sessions){
   return(e?.steps||0)>=8000;
 }
 
-function calcStreak(){
-  const entries=getEntries(),sessions=getSessions();
-  const active=d=>isActiveDay(d,entries,sessions);
-  const todayStr=today();
-  let streak=0,startOff=active(todayStr)?0:1;
-  for(let i=startOff;;i++){
-    const d=new Date();d.setDate(d.getDate()-i);
-    const ds=d.toISOString().slice(0,10);
-    if(active(ds))streak++;else break;
+function calcWeeklyActivity(){
+  const sessions=getSessions(),entries=getEntries();
+  const now=new Date();
+  const mondayOff=(now.getDay()+6)%7;
+  function weekRange(weeksAgo){
+    const mon=new Date(now);mon.setDate(now.getDate()-mondayOff-weeksAgo*7);
+    const sun=new Date(mon);sun.setDate(mon.getDate()+6);
+    return{from:mon.toISOString().slice(0,10),to:sun.toISOString().slice(0,10)};
   }
-  const prevBest=parseInt(localStorage.getItem(BEST_STREAK_KEY))||0;
-  const best=Math.max(streak,prevBest);
-  if(streak>=prevBest)localStorage.setItem(BEST_STREAK_KEY,String(streak));
-  const activeDays=Array.from({length:14},(_,i)=>{const d=new Date();d.setDate(d.getDate()-i);return d.toISOString().slice(0,10)}).filter(active).length;
-  return{current:streak,best,momentum:Math.round(activeDays/14*100),activeDays};
+  function weekStats(from,to){
+    const wS=sessions.filter(s=>s.date>=from&&s.date<=to);
+    const mins=wS.reduce((s,x)=>s+((x.type==='gym'?x.gymDuration:x.duration)||x.duration||0),0);
+    const wCals=wS.reduce((s,x)=>s+((x.type==='gym'?x.gymCals:x.calories)||0),0);
+    const sCals=entries.filter(e=>e.date>=from&&e.date<=to).reduce((s,e)=>s+(e.stepsCals||0),0);
+    return{mins,cals:wCals+sCals};
+  }
+  const curr=weekRange(0),prev=weekRange(1);
+  const thisWeek=weekStats(curr.from,curr.to);
+  const lastWeek=weekStats(prev.from,prev.to);
+  const past4=Array.from({length:4},(_,i)=>{const r=weekRange(i+1);return weekStats(r.from,r.to);});
+  const activePast=past4.filter(w=>w.mins>0||w.cals>0);
+  const monthlyAvg=activePast.length?{
+    mins:Math.round(activePast.reduce((s,w)=>s+w.mins,0)/activePast.length),
+    cals:Math.round(activePast.reduce((s,w)=>s+w.cals,0)/activePast.length)
+  }:null;
+  return{thisWeek,lastWeek,monthlyAvg,hasLastWeek:lastWeek.mins>0||lastWeek.cals>0};
 }
 
-function renderStreakCard(){
-  const card=document.getElementById('streak-card');if(!card)return;
-  const{current,best,momentum,activeDays}=calcStreak();
-  const mCol=momentum>=70?'#43e97b':momentum>=40?'#f9ca24':'#ff4757';
-  card.innerHTML=`
-    <h3>Streak &amp; Momentum</h3>
-    <div style="display:flex;gap:20px;align-items:center;margin-bottom:14px">
-      <div style="text-align:center">
-        <div style="font-size:32px">🔥</div>
-        <div style="font-size:32px;font-weight:700;color:var(--orange);line-height:1">${current}</div>
-        <div style="font-size:10px;color:var(--text2);text-transform:uppercase;letter-spacing:.6px;margin-top:2px">Streak</div>
+function renderAktivitaetCard(){
+  const card=document.getElementById('aktivitaet-card');if(!card)return;
+  const{thisWeek,lastWeek,monthlyAvg,hasLastWeek}=calcWeeklyActivity();
+  function cmp(val,ref){
+    if(ref==null)return'<span style="color:var(--text2);font-size:11px">—</span>';
+    const diff=val-ref;
+    const col=diff>=0?'var(--green)':'var(--red)';
+    return`<span style="color:${col};font-size:11px">${diff>=0?'↑':'↓'} ${diff>=0?'+':''}${diff}</span>`;
+  }
+  function row(icon,label,val,unit,vsLast,vsMon){
+    return`<div style="margin-bottom:12px">
+      <div style="font-size:11px;color:var(--text2);text-transform:uppercase;letter-spacing:.7px;margin-bottom:3px">${icon} ${label}</div>
+      <div style="font-size:22px;font-weight:700;color:var(--text);line-height:1.1">${val.toLocaleString()} <span style="font-size:13px;font-weight:400;color:var(--text2)">${unit}</span></div>
+      <div style="display:flex;gap:10px;margin-top:4px;flex-wrap:wrap">
+        <span style="font-size:11px;color:var(--text2)">vs. Vorwoche: ${hasLastWeek?cmp(val,vsLast):'<span style="color:var(--text2)">—</span>'}</span>
+        <span style="font-size:11px;color:var(--text2)">vs. Monatsschnitt: ${monthlyAvg?cmp(val,vsMon):'<span style="color:var(--text2)">—</span>'}</span>
       </div>
-      <div style="text-align:center">
-        <div style="font-size:24px;font-weight:700;color:var(--text2)">${best}</div>
-        <div style="font-size:10px;color:var(--text2);text-transform:uppercase;letter-spacing:.6px;margin-top:2px">Best</div>
-      </div>
-    </div>
-    <div style="font-size:12px;color:var(--text2);margin-bottom:6px">Momentum: ${activeDays}/14 Tage aktiv (${momentum}%)</div>
-    <div style="height:6px;background:var(--surface2);border-radius:3px;overflow:hidden">
-      <div style="height:100%;width:${momentum}%;background:${mCol};border-radius:3px"></div>
     </div>`;
+  }
+  card.innerHTML=`
+    <h3>Wöchentliche Aktivität</h3>
+    ${row('⏱','Aktive Minuten',thisWeek.mins,'min',lastWeek.mins,monthlyAvg?.mins)}
+    ${row('🔥','Kalorien',thisWeek.cals,'kcal',lastWeek.cals,monthlyAvg?.cals)}`;
 }
 
 function renderWeeklyScore(){
@@ -2694,6 +2707,7 @@ function saveStarting(){
 // intentionally NEVER included, regardless of what else is in localStorage.
 function safeExportData(){
   const BLOCKED = /key|token|api/i;
+  const act=calcWeeklyActivity();
   const safe = {
     entries:   getEntries(),
     goals:     getGoals(),
@@ -2701,6 +2715,14 @@ function safeExportData(){
     exercises: getExercises(),
     plans:     getPlans(),
     sessions:  getSessions(),
+    weekly_activity: {
+      week_active_minutes:       act.thisWeek.mins,
+      week_calories_burned:      act.thisWeek.cals,
+      prev_week_active_minutes:  act.lastWeek.mins,
+      prev_week_calories_burned: act.lastWeek.cals,
+      monthly_avg_active_minutes:  act.monthlyAvg?.mins??null,
+      monthly_avg_calories_burned: act.monthlyAvg?.cals??null,
+    },
   };
   // Defensive check: drop any field whose name matches the blocked pattern
   return Object.fromEntries(Object.entries(safe).filter(([k])=>!BLOCKED.test(k)));
