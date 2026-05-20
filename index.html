@@ -870,6 +870,22 @@ let currentSession={date:today(),type:'gym',comment:'',exercises:[],duration:nul
 // exercise entry: {exId, name, group, comment, sets:[{reps,weight,comment}]}
 
 // ── Last-session reference helpers ──────────────────────────────────────────
+function getLastExerciseComment(exName){
+  // Walk back through past gym sessions, return the most recent non-empty
+  // exercise-level comment ("Exercise note" field) plus its date.
+  const sessions=getSessions();
+  for(let i=sessions.length-1;i>=0;i--){
+    const s=sessions[i];
+    if(s.type&&s.type!=='gym')continue;
+    if(!s.exercises)continue;
+    const ex=s.exercises.find(e=>e.name===exName);
+    if(!ex)continue;
+    const text=(ex.comment||'').trim();
+    if(text)return{text,date:s.date?s.date.slice(5):''};
+  }
+  return null;
+}
+
 function getLastExerciseData(exName){
   const sessions=getSessions();
   for(let i=sessions.length-1;i>=0;i--){
@@ -1072,14 +1088,17 @@ function renderSessionExercises(){
   container.innerHTML=currentSession.exercises.map((ex,ei)=>{
     const lastEx=getLastExerciseData(ex.name);
     const lastHint=lastEx?`<div style="color:var(--text2);font-size:11px;margin-top:3px;letter-spacing:.1px">↩ Last: ${lastEx}</div>`:'';
+    const lastNote=getLastExerciseComment(ex.name);
+    const lastNoteHint=lastNote?`<div style="color:var(--yellow);font-size:11px;margin-top:5px;padding:5px 9px;background:#f9ca2415;border-left:2px solid var(--yellow);border-radius:4px;line-height:1.4">💭 <span style="color:var(--text)">${escHtml(lastNote.text)}</span> <span style="color:var(--text2);font-style:italic;margin-left:4px">(${lastNote.date})</span></div>`:'';
     const hasPR=ex.sets.some(s=>isCurrentSetPR(ex.name,s.weight,s.reps));
     return`
     <div class="session-exercise" id="sex-${ei}">
       <div class="session-ex-header">
-        <div>
+        <div style="flex:1;min-width:0">
           <span class="session-ex-name">${ex.name}</span>${hasPR?` <span style="background:#f9ca2422;border:1px solid #f9ca2455;border-radius:5px;padding:1px 7px;font-size:11px;font-weight:700;color:#f9ca24;vertical-align:middle">🏆 PR</span>`:''}
           <span class="session-ex-group">${ex.group}</span>
           ${lastHint}
+          ${lastNoteHint}
         </div>
         <div style="display:flex;gap:6px">
           <button class="btn btn-secondary btn-sm" onclick="moveEx(${ei},-1)" title="Move up">↑</button>
@@ -3121,6 +3140,25 @@ document.getElementById('sess-date').value=today();
   try{
     const sessions=getSessions();
     for(const s of sessions){if(s.comment)checkAndUpdatePRs(s);}
+    localStorage.setItem(FLAG,'1');
+  }catch(e){/* best-effort */}
+})();
+
+// One-time cleanup: remove the unused "Longevity – 6 Wochen" placeholder plan
+// that was created in an earlier version. Explicitly protects active plans
+// and the user's "6 Wo Plan start ..." plan.
+(function cleanupLongevityPlan(){
+  const FLAG='trackfit_longevity_plan_cleanup_v1';
+  if(localStorage.getItem(FLAG))return;
+  try{
+    const plans=getPlans();
+    const filtered=plans.filter(p=>{
+      if(!p||typeof p.name!=='string')return true;
+      if(p.active)return true;                         // never delete active plan
+      if(/^\s*6\s*Wo\s*Plan/i.test(p.name))return true; // explicit user plan guard
+      return !/^\s*longevity/i.test(p.name);           // drop Longevity-prefixed
+    });
+    if(filtered.length!==plans.length)set(PLANS_KEY,filtered);
     localStorage.setItem(FLAG,'1');
   }catch(e){/* best-effort */}
 })();
